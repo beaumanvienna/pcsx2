@@ -486,9 +486,12 @@ void XRRConfiguration::Update()
 
 	// Get the resolution settings for fullscreen mode
 	unsigned int fullWidth, fullHeight;
-	const char *output_name = (const char*)g_Conf->GSWindow.MonitorName.mb_str();
+	char cstring[1024];
+	char *output_name;
 	fullWidth   = g_Conf->GSWindow.FullscreenX;
 	fullHeight  = g_Conf->GSWindow.FullscreenY;
+	strncpy(cstring, (const char*)g_Conf->GSWindow.MonitorName.mb_str(wxConvUTF8), 1023);
+	output_name = (char *)cstring;
 
 	for (int i = 0; i < screenResources->noutput; i++)
 	{
@@ -543,8 +546,8 @@ void XRRConfiguration::Update()
 	fs_fb_width_mm = fs_fb_width * DisplayHeightMM(dpy, screen) / DisplayHeight(dpy, screen);
 	fs_fb_height_mm = fs_fb_height * DisplayHeightMM(dpy, screen) / DisplayHeight(dpy, screen);
 
-	if (output_name)
-		free((char*)output_name);
+	//if (output_name)
+	//	free((char*)output_name);
 
 	if (outputInfo && crtcInfo && fullMode)
 	{
