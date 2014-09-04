@@ -837,7 +837,10 @@ void AppConfig::GSWindowOptions::LoadSave( IniInterface& ini )
 	IniEntry( IsMaximized );
 	IniEntry( IsFullscreen );
 
-    IniEntry( IsToggleFullscreenOnDoubleClick );
+	IniEntry( IsToggleFullscreenOnDoubleClick );
+	IniEntry( MonitorName );
+	IniEntry( FullscreenX );
+	IniEntry( FullscreenY );
 
 	static const wxChar* AspectRatioNames[] =
 	{

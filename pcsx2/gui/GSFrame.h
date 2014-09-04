@@ -117,6 +117,7 @@ protected:
 	void CoreThread_OnSuspended();
 	void CoreThread_OnStopped();
 	void CorePlugins_OnShutdown();
+	wxPoint GetGSStartPosition();
 };
 
 // --------------------------------------------------------------------------------------

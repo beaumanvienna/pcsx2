@@ -23,9 +23,10 @@
 #include "MSWstuff.h"
 
 #include <wx/utils.h>
+#include "X11Utils.h"
 
 static const KeyAcceleratorCode FULLSCREEN_TOGGLE_ACCELERATOR_GSPANEL=KeyAcceleratorCode( WXK_RETURN ).Alt();
-
+int renderWindowXPos,renderWindowYPos;
 //#define GSWindowScaleDebug
 
 void GSPanel::InitDefaultAccelerators()
@@ -295,7 +296,7 @@ void GSPanel::DirectKeyCommand( const KeyAcceleratorCode& kac )
 	const GlobalCommandDescriptor* cmd = NULL;
 	m_Accels->TryGetValue( kac.val32, cmd );
 	if( cmd == NULL ) return;
-
+	Console.WriteLn("RetroRig: (gsFrame) Invoking command: %s", cmd->Id );
 	DbgCon.WriteLn( "(gsFrame) Invoking command: %s", cmd->Id );
 	cmd->Invoke();
 	
@@ -362,6 +363,7 @@ void GSPanel::OnLeftDclick(wxMouseEvent& evt)
 		return;
 
 	//Console.WriteLn("GSPanel::OnDoubleClick: Invoking Fullscreen-Toggle accelerator.");
+	Console.WriteLn("RetroRig: OnLeftDclick");
 	DirectKeyCommand(FULLSCREEN_TOGGLE_ACCELERATOR_GSPANEL);
 }
 
@@ -373,9 +375,221 @@ void GSPanel::OnLeftDclick(wxMouseEvent& evt)
 
 static const uint TitleBarUpdateMs = 333;
 
+wxPoint GSFrame::GetGSStartPosition()
+{
+#define RETRORIG_PL1
+	
+	if (g_Conf->GSWindow.MonitorName.IsEmpty())
+	{
+	  Console.WriteLn("RetroRig: GetGSStartPosition() default value");
+	  return g_Conf->GSWindow.WindowPos;
+	}
+	else
+	{
+	  #ifdef RETRORIG_PL1
+	    Console.WriteLn("RetroRig: GetGSStartPosition() found monitor name: %s", (const char*)g_Conf->GSWindow.MonitorName.mb_str());
+	  #endif
+	    
+	  X11Utils::XRRConfiguration *m_XRRConfig;
+	  void *Handle;
+	  Display *_dpy;
+	  Window _win;
+	  
+	  //Handle  = m_widget;
+	  //_dpy    = X11Utils::XDisplayFromHandle(Handle);
+	  //_win    = X11Utils::XWindowFromHandle(Handle);
+	  
+	  _dpy   = XOpenDisplay(0);
+	  _win = DefaultRootWindow(_dpy);
+	  
+	  m_XRRConfig = new X11Utils::XRRConfiguration(_dpy,_win);
+	 
+	  wxPoint myPos(renderWindowXPos,renderWindowYPos);
+	  
+	  return myPos;
+	}
+}
+
+namespace X11Utils
+{
+#if defined(HAVE_WX) && HAVE_WX
+	Window XWindowFromHandle(void *Handle)
+	{
+		return GDK_WINDOW_XID(gtk_widget_get_window(GTK_WIDGET(Handle)));
+	}
+
+	Display *XDisplayFromHandle(void *Handle)
+	{
+		return GDK_WINDOW_XDISPLAY(gtk_widget_get_window(GTK_WIDGET(Handle)));
+	}
+#endif
+
+
+#if defined(HAVE_XRANDR) && HAVE_XRANDR
+XRRConfiguration::XRRConfiguration(Display *_dpy, Window _win)
+	: dpy(_dpy)
+	, win(_win)
+	, screenResources(NULL), outputInfo(NULL), crtcInfo(NULL)
+	, fullMode(0)
+	, fs_fb_width(0), fs_fb_height(0), fs_fb_width_mm(0), fs_fb_height_mm(0)
+	, bValid(true), bIsFullscreen(false)
+{
+	int XRRMajorVersion, XRRMinorVersion;
+
+	if (!XRRQueryVersion(dpy, &XRRMajorVersion, &XRRMinorVersion) ||
+			(XRRMajorVersion < 1 || (XRRMajorVersion == 1 && XRRMinorVersion < 3)))
+	{
+		bValid = false;
+		return;
+	}
+
+	screenResources = XRRGetScreenResourcesCurrent(dpy, win);
+
+	screen = DefaultScreen(dpy);
+	fb_width = DisplayWidth(dpy, screen);
+	fb_height = DisplayHeight(dpy, screen);
+	fb_width_mm = DisplayWidthMM(dpy, screen);
+	fb_height_mm = DisplayHeightMM(dpy, screen);
+
+	Update();
+}
+
+XRRConfiguration::~XRRConfiguration()
+{
+	if (bValid && bIsFullscreen)
+		ToggleDisplayMode(False);
+	if (screenResources)
+		XRRFreeScreenResources(screenResources);
+	if (outputInfo)
+		XRRFreeOutputInfo(outputInfo);
+	if (crtcInfo)
+		XRRFreeCrtcInfo(crtcInfo);
+}
+
+void XRRConfiguration::Update()
+{
+
+	if (!bValid)
+		return;
+
+	if (outputInfo)
+	{
+		XRRFreeOutputInfo(outputInfo);
+		outputInfo = NULL;
+	}
+	if (crtcInfo)
+	{
+		XRRFreeCrtcInfo(crtcInfo);
+		crtcInfo = NULL;
+	}
+	fullMode = 0;
+
+	// Get the resolution settings for fullscreen mode
+	unsigned int fullWidth, fullHeight;
+	const char *output_name = (const char*)g_Conf->GSWindow.MonitorName.mb_str();
+	fullWidth   = g_Conf->GSWindow.FullscreenX;
+	fullHeight  = g_Conf->GSWindow.FullscreenY;
+
+	for (int i = 0; i < screenResources->noutput; i++)
+	{
+		XRROutputInfo *output_info = XRRGetOutputInfo(dpy, screenResources, screenResources->outputs[i]);
+		if (output_info && output_info->crtc && output_info->connection == RR_Connected)
+		{
+			XRRCrtcInfo *crtc_info = XRRGetCrtcInfo(dpy, screenResources, output_info->crtc);
+			if (crtc_info)
+			{
+				if (!output_name || !strcmp(output_name, output_info->name))
+				{
+					// Use the first output for the default setting.
+					if (!output_name)
+					{
+						output_name = strdup(output_info->name);
+					}
+					outputInfo = output_info;
+					crtcInfo = crtc_info;
+					for (int j = 0; j < output_info->nmode && fullMode == 0; j++)
+					{
+						for (int k = 0; k < screenResources->nmode && fullMode == 0; k++)
+						{
+							if (output_info->modes[j] == screenResources->modes[k].id)
+							{
+								if (fullWidth == screenResources->modes[k].width &&
+										fullHeight == screenResources->modes[k].height)
+								{
+									fullMode = screenResources->modes[k].id;
+									if (crtcInfo->x + (int)screenResources->modes[k].width > fs_fb_width)
+										fs_fb_width = crtcInfo->x + screenResources->modes[k].width;
+									if (crtcInfo->y + (int)screenResources->modes[k].height > fs_fb_height)
+										fs_fb_height = crtcInfo->y + screenResources->modes[k].height;
+								}
+							}
+						}
+					}
+				}
+				else
+				{
+					if (crtc_info->x + (int)crtc_info->width > fs_fb_width)
+						fs_fb_width = crtc_info->x + crtc_info->width;
+					if (crtc_info->y + (int)crtc_info->height > fs_fb_height)
+						fs_fb_height = crtc_info->y + crtc_info->height;
+				}
+			}
+			if (crtc_info && crtcInfo != crtc_info)
+				XRRFreeCrtcInfo(crtc_info);
+		}
+		if (output_info && outputInfo != output_info)
+			XRRFreeOutputInfo(output_info);
+	}
+	fs_fb_width_mm = fs_fb_width * DisplayHeightMM(dpy, screen) / DisplayHeight(dpy, screen);
+	fs_fb_height_mm = fs_fb_height * DisplayHeightMM(dpy, screen) / DisplayHeight(dpy, screen);
+
+	if (output_name)
+		free((char*)output_name);
+
+	if (outputInfo && crtcInfo && fullMode)
+	{
+		
+		renderWindowXPos=crtcInfo->x;
+		renderWindowYPos=crtcInfo->y;
+		
+	}
+}
+
+void XRRConfiguration::ToggleDisplayMode(bool bFullscreen)
+{
+	/*if (!bValid || !screenResources || !outputInfo || !crtcInfo || !fullMode)
+		return;
+	if (bFullscreen == bIsFullscreen)
+		return;
+
+	XGrabServer(dpy);
+	if (bFullscreen)
+	{
+		XRRSetCrtcConfig(dpy, screenResources, outputInfo->crtc, CurrentTime,
+				crtcInfo->x, crtcInfo->y, fullMode, crtcInfo->rotation,
+				crtcInfo->outputs, crtcInfo->noutput);
+		XRRSetScreenSize(dpy, win, fs_fb_width, fs_fb_height, fs_fb_width_mm, fs_fb_height_mm);
+		bIsFullscreen = true;
+	}
+	else
+	{
+		XRRSetCrtcConfig(dpy, screenResources, outputInfo->crtc, CurrentTime,
+				crtcInfo->x, crtcInfo->y, crtcInfo->mode, crtcInfo->rotation,
+				crtcInfo->outputs, crtcInfo->noutput);
+		XRRSetScreenSize(dpy, win, fb_width, fb_height, fb_width_mm, fb_height_mm);
+		bIsFullscreen = false;
+	}
+	XUngrabServer(dpy);
+	XSync(dpy, false);
+	*/
+}
+
+#endif
+
+}
 
 GSFrame::GSFrame(wxWindow* parent, const wxString& title)
-	: wxFrame(parent, wxID_ANY, title, g_Conf->GSWindow.WindowPos)
+	: wxFrame(parent, wxID_ANY, title, GetGSStartPosition())
 	, m_timer_UpdateTitle( this )
 {
 	SetIcons( wxGetApp().GetIconBundle() );

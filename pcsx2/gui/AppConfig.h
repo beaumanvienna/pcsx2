@@ -208,6 +208,9 @@ public:
 		bool		IsFullscreen;
 
 		bool		IsToggleFullscreenOnDoubleClick;
+		wxString	MonitorName;
+		int		FullscreenX;
+		int		FullscreenY;
 
 		GSWindowOptions();
 
