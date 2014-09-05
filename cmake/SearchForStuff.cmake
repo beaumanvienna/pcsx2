@@ -22,6 +22,7 @@ if(Linux)
     endif(GTK2_FOUND)
 
     find_package(X11)
+    find_package(XRANDR)
 endif(Linux)
 
 ## Use cmake package to find module
